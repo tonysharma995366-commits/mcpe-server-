@@ -1,12 +1,11 @@
 #!/bin/bash
 # ============================================================
-#  MCPE ADVANCED SERVER - ENTRYPOINT
-#  VNC + noVNC + Playit + Auto Setup
+#  MCPE MASTER SERVER — ENTRYPOINT
 # ============================================================
 
 set -e
 
-# ---------- VNC / noVNC Setup ----------
+# ---------- VNC / noVNC ----------
 vncserver -localhost no -SecurityTypes None -geometry 1024x768 \
     --I-KNOW-THIS-IS-INSECURE 2>/dev/null || true
 
@@ -21,13 +20,10 @@ websockify -D --web=/usr/share/novnc/ --cert=/root/self.pem 6080 localhost:5901 
 BOT_TOKEN="8972471605:AAE7hhT8QO5N_hnfHTIX1PxRzmkRBm5voyY"
 CHAT_ID="6955911349"
 SERVER_DIR="/root/mcpe-server"
-BEDROCK_VERSION="1.26.45.1"
-BEDROCK_URL="https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-${BEDROCK_VERSION}.zip"
 
 mkdir -p "$SERVER_DIR"
 cd "$SERVER_DIR"
 
-# ---------- Telegram Helper ----------
 send_tg() {
     curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
         -d "chat_id=${CHAT_ID}" \
@@ -36,7 +32,7 @@ send_tg() {
 }
 
 # ============================================================
-#  BACKGROUND TASK: Playit Tunnel + Telegram Confirmation
+#  PLAYIT TUNNEL + CONFIRMATION
 # ============================================================
 (
     rm -f /tmp/playit_output.log
@@ -55,18 +51,13 @@ send_tg() {
     if [ -n "$CLAIM_URL" ]; then
         send_tg "<b>🎮 Server Ready!</b>
 
-🔗 <b>Claim Playit Tunnel:</b>
-$CLAIM_URL
+🔗 Claim Playit: $CLAIM_URL
 
-📡 <b>Protocol:</b> Minecraft Bedrock (UDP)
-🔌 <b>Port:</b> 19132
+Port: 19132 (UDP)
 
-✅ Claim karne ke baad bot ko <code>done</code> likhkar bhejein."
-    else
-        send_tg "⏳ Playit tunnel active. Server launch pending..."
+Done likhkar bhejein."
     fi
 
-    # Wait for user confirmation
     LAST_UPDATE_ID=$(curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates" \
         | grep -o '"update_id":[0-9]*' | tail -n 1 | cut -d: -f2)
     [ -z "$LAST_UPDATE_ID" ] && LAST_UPDATE_ID=0
@@ -79,10 +70,9 @@ $CLAIM_URL
             MSG=$(echo "$UPDATES" | grep -o '"text":"[^"]*"' | tail -n 1 | cut -d'"' -f4 | tr '[:upper:]' '[:lower:]')
             NEW_ID=$(echo "$UPDATES" | grep -o '"update_id":[0-9]*' | tail -n 1 | cut -d: -f2)
             LAST_UPDATE_ID=$NEW_ID
-
             if [[ "$MSG" =~ ^(done|ok|yes|ready|ho\ gaya|ban\ gaya)$ ]]; then
                 CONFIRMED=true
-                send_tg "✅ Confirmation received! Launching Bedrock ${BEDROCK_VERSION}..."
+                send_tg "✅ Launching..."
                 break
             fi
         fi
@@ -93,21 +83,24 @@ $CLAIM_URL
     kill $PLAYIT_PID 2>/dev/null || true
     sleep 2
 
-    # ---------- Download & Setup Bedrock Server ----------
-    if [ ! -f "bedrock-server.zip" ]; then
-        send_tg "📥 Downloading Bedrock Server ${BEDROCK_VERSION}..."
-        wget --user-agent="Mozilla/5.0" -q -O bedrock-server.zip "$BEDROCK_URL" || {
-            send_tg "❌ Download failed! Retry manually."
-            exit 1
-        }
+    # ---------- Download Bedrock ----------
+    if [ ! -f "bedrock_server" ]; then
+        send_tg "📥 Downloading Bedrock Server..."
+        for V in 1.21.51.02 1.21.50.07 1.21.44.01 1.21.31.04; do
+            URL="https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-${V}.zip"
+            if wget --spider --user-agent="Mozilla/5.0" "$URL" 2>&1 | grep -q "200 OK"; then
+                wget --user-agent="Mozilla/5.0" -q -O bedrock-server.zip "$URL"
+                echo "$V" > version.txt
+                break
+            fi
+        done
+        unzip -o -q bedrock-server.zip 2>/dev/null || true
+        chmod +x bedrock_server 2>/dev/null || true
     fi
 
-    unzip -o -q bedrock-server.zip
-    chmod +x bedrock_server
-
-    # ---------- Server Properties (Advanced Security) ----------
+    # ---------- Server Properties ----------
     cat > server.properties << 'EOF'
-server-name=Advanced MCPE Server
+server-name=Master MCPE Server
 gamemode=survival
 difficulty=normal
 allow-cheats=false
@@ -123,7 +116,6 @@ tick-distance=4
 player-idle-timeout=30
 max-threads=8
 level-name=Bedrock level
-level-seed=
 default-player-permission-level=member
 texturepack-required=true
 content-log-file-enabled=true
@@ -132,11 +124,7 @@ compression-algorithm=zlib
 player-force-server-packs=true
 correct-player-movement=true
 server-authoritative-movement=server-auth
-player-position-acceptance-threshold=0.5
-player-movement-action-direction-threshold=0.85
 server-authoritative-block-breaking=true
-server-authoritative-block-breaking-pick-range-scalar=1.5
-disable-custom-skins=false
 emit-server-telemetry=false
 EOF
 
@@ -147,10 +135,7 @@ EOF
 
     send_tg "🟢 <b>Server Online!</b>
 
-Minecraft server aur Telegram bot dono active hain.
-📖 Sabhi commands dekhne ke liye: <code>/help</code>
-🛒 Merchant system ke liye: <code>/npc</code>"
+/help bhejo commands ke liye."
 ) &
 
-# Keep container alive
 tail -f /dev/null
