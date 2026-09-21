@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-#  MCPE MASTER SERVER — ENTRYPOINT
+#  MCPE MASTER SERVER — ULTRA FAST ENTRYPOINT
 # ============================================================
 
 set -e
@@ -25,11 +25,23 @@ mkdir -p "$SERVER_DIR"
 cd "$SERVER_DIR"
 
 send_tg() {
-    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+    curl -s --max-time 5 -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
         -d "chat_id=${CHAT_ID}" \
         -d "parse_mode=HTML" \
         --data-urlencode "text=$1" > /dev/null 2>&1
 }
+
+# ============================================================
+#  KILL ANY EXISTING PROCESSES (Prevent duplicates)
+# ============================================================
+pkill -9 -f tg_manager.py 2>/dev/null || true
+pkill -9 -f bedrock_server 2>/dev/null || true
+pkill -9 -f playit-cli 2>/dev/null || true
+sleep 2
+screen -wipe 2>/dev/null || true
+
+# Clear old Telegram pending updates
+curl -s --max-time 5 "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=-1" > /dev/null 2>&1 || true
 
 # ============================================================
 #  PLAYIT TUNNEL + CONFIRMATION
@@ -58,25 +70,26 @@ Port: 19132 (UDP)
 Done likhkar bhejein."
     fi
 
-    LAST_UPDATE_ID=$(curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates" \
+    # Fast confirmation loop (1 sec interval)
+    LAST_UPDATE_ID=$(curl -s --max-time 5 "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=-1" \
         | grep -o '"update_id":[0-9]*' | tail -n 1 | cut -d: -f2)
     [ -z "$LAST_UPDATE_ID" ] && LAST_UPDATE_ID=0
 
     CONFIRMED=false
     WAIT_COUNT=0
-    while [ "$CONFIRMED" = false ] && [ $WAIT_COUNT -lt 300 ]; do
-        UPDATES=$(curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=$((LAST_UPDATE_ID + 1))")
+    while [ "$CONFIRMED" = false ] && [ $WAIT_COUNT -lt 600 ]; do
+        UPDATES=$(curl -s --max-time 3 "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=$((LAST_UPDATE_ID + 1))")
         if echo "$UPDATES" | grep -q '"text"'; then
             MSG=$(echo "$UPDATES" | grep -o '"text":"[^"]*"' | tail -n 1 | cut -d'"' -f4 | tr '[:upper:]' '[:lower:]')
             NEW_ID=$(echo "$UPDATES" | grep -o '"update_id":[0-9]*' | tail -n 1 | cut -d: -f2)
             LAST_UPDATE_ID=$NEW_ID
             if [[ "$MSG" =~ ^(done|ok|yes|ready|ho\ gaya|ban\ gaya)$ ]]; then
                 CONFIRMED=true
-                send_tg "✅ Launching..."
+                send_tg "✅ Launching server..."
                 break
             fi
         fi
-        sleep 3
+        sleep 1
         WAIT_COUNT=$((WAIT_COUNT + 1))
     done
 
@@ -85,11 +98,11 @@ Done likhkar bhejein."
 
     # ---------- Download Bedrock ----------
     if [ ! -f "bedrock_server" ]; then
-        send_tg "📥 Downloading Bedrock Server..."
-        for V in 1.21.51.02 1.21.50.07 1.21.44.01 1.21.31.04; do
+        send_tg "📥 Downloading Bedrock..."
+        for V in 1.21.51.02 1.21.50.07 1.21.44.01 1.21.31.04 1.21.30.03; do
             URL="https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-${V}.zip"
-            if wget --spider --user-agent="Mozilla/5.0" "$URL" 2>&1 | grep -q "200 OK"; then
-                wget --user-agent="Mozilla/5.0" -q -O bedrock-server.zip "$URL"
+            if wget --spider --user-agent="Mozilla/5.0" --timeout=10 "$URL" 2>&1 | grep -q "200 OK"; then
+                wget --user-agent="Mozilla/5.0" --timeout=60 -q -O bedrock-server.zip "$URL"
                 echo "$V" > version.txt
                 break
             fi
@@ -130,8 +143,9 @@ EOF
 
     # ---------- Start Services ----------
     screen -dmS playit-tunnel /usr/local/bin/playit-cli
-    sleep 3
+    sleep 2
     screen -dmS tg-bot python3 /root/tg_manager.py
+    sleep 2
 
     send_tg "🟢 <b>Server Online!</b>
 
